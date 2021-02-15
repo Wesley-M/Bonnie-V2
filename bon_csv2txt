@@ -1,0 +1,182 @@
+#!/usr/bin/perl
+use strict;
+
+my @io;
+my $iocount = 0;
+my @file;
+my $filecount = 0;
+
+{
+  my $line;
+  while(my $line = <STDIN>)
+  {
+    while($line =~ /^name,/)
+    {
+      $line = <STDIN>;
+    }
+    process($line);
+  }
+  printIOData();
+
+  printFileData();
+}
+
+sub IOHeader
+{
+  my $version = '2.00';
+printf(STDOUT "Version %9s   ------Sequential Output------ --Sequential Input- --Random-\n", $version);
+print "                    -Per Chr- --Block-- -Rewrite- -Per Chr- --Block-- --Seeks--\n";
+print "Name:Size etc        /sec %CP  /sec %CP  /sec %CP  /sec %CP  /sec %CP  /sec %CP\n";
+}
+
+sub FileHeader
+{
+print "                    ------Sequential Create------ --------Random Create--------\n";
+print "                    -Create-- --Read--- -Delete-- -Create-- --Read--- -Delete--\n";
+print "      files:max:min  /sec %CP  /sec %CP  /sec %CP  /sec %CP  /sec %CP  /sec %CP\n";
+}
+
+sub process
+{
+  my($line) = @_;
+
+  chomp($line);
+  $line =~ s/\r//;
+  my @arr = split(',', $line);
+  my $csv_version = '1.98';
+  if($arr[0] ne $csv_version)
+  {
+    printf(STDERR "Expected %s, got %s from %s\n", $csv_version, $arr[0], $line);
+    return;
+  }
+  my $name = $arr[2];
+
+# merge size and chunk-size
+  my $tmp = join(':', @arr[5 .. 8]);
+  $tmp =~ s/:*$//;
+  $arr[8] = $tmp;
+# $ioline contains the file-IO data, IE we strip off the data on file creation
+  my @ioline = @arr[8 .. 20];
+  if(join('', @ioline) ne "")
+  {
+    $io[$iocount] = $name . "," . join(',', @ioline);
+    if($#arr > 39)
+    {
+      $io[$iocount] .= "," . join(',', @arr[38..43]);
+    }
+    $iocount++;
+  }
+
+# merge num_files, max_size, min_size, num_dirs, and file_chunk_size
+  $tmp = $arr[21];
+  if($arr[22] ne "")
+  {
+    $tmp .= ":" . $arr[22];
+  }
+  if($arr[23] ne "")
+  {
+    $tmp .= ":" . $arr[23];
+  }
+  if($arr[24] ne "")
+  {
+    $tmp .= "/" . $arr[24];
+  }
+  if($arr[25] ne "")
+  {
+    $tmp .= ":" . $arr[25];
+  }
+  $arr[25] = $tmp;
+# $fileline contains the file creation data - everything but $ioline
+  my @fileline = @arr[25 .. 37];
+  if(join('', @fileline) ne "")
+  {
+    $file[$filecount] = $name . "," . join(',', @fileline);
+    if($#arr > 43)
+    {
+      $file[$filecount] .= "," . join(',', @arr[44..$#arr]);
+    }
+    $filecount++;
+  }
+}
+
+sub printFileData
+{
+  if($filecount < 1){ return; }
+  FileHeader();
+  for(my $i = 0; $i < $filecount; $i++)
+  {
+    my @arr = split(/,/,$file[$i]);
+    my $size = $arr[1];
+    my $desc = $arr[0] . "                   ";
+    if(length($size) < 18)
+    {
+      $desc = substr($desc, 0, 18 - length($size) );
+      $desc .= " " . $size;
+    }
+    else
+    {
+      $desc = $size;
+    }
+    printf(STDOUT "%19s %5s %3s %5s %3s %5s %3s %5s %3s %5s %3s %5s %3s\n"
+         , $desc, $arr[2], $arr[3], $arr[4], $arr[5], $arr[6], $arr[7]
+         , $arr[8], $arr[9], $arr[10], $arr[11], $arr[12], $arr[13]);
+    if($#arr > 13 && join("", @arr[14..$#arr]) ne "")
+    {
+      printf(STDOUT "Latency           %9s %9s %9s %9s %9s %9s\n"
+           , $arr[14], $arr[15], $arr[16], $arr[17], $arr[18], $arr[19]);
+    }
+  }
+}
+
+sub convSpd
+{
+  my ($speed) = @_;
+  if($speed eq "")
+  {
+    return "";
+  }
+  if($speed < 10000)
+  {
+    return sprintf("%4dk", $speed);
+  }
+  if($speed / 1024 < 1000)
+  {
+    my $tmp = $speed / 1024;
+    if($tmp < 100)
+    {
+      return sprintf("%4.1fm", $tmp);
+    }
+    return sprintf("%4dm", ($tmp + 0.5));
+  }
+  return sprintf("%4.1fg", $speed / 1024 / 1024);
+}
+
+sub printIOData
+{
+  if($iocount < 1){ return; }
+  IOHeader();
+  for(my $i = 0; $i < $iocount; $i++)
+  {
+    my @arr = split(/,/,$io[$i]);
+    my $size = $arr[1];
+    my $desc = $arr[0] . "                   ";
+    if(length($size) < 18)
+    {
+      $desc = substr($desc, 0, 18 - length($size) );
+      $desc .= " " . $size;
+    }
+    else
+    {
+      $desc = $size;
+    }
+    printf(STDOUT "%19s %5s %3s %5s %3s %5s %3s %5s %3s %5s %3s %5s %3s\n"
+         , $desc, convSpd($arr[2]), $arr[3], convSpd($arr[4]), $arr[5], convSpd($arr[6]), $arr[7]
+         , convSpd($arr[8]), $arr[9], convSpd($arr[10]), $arr[11], $arr[12], $arr[13]);
+    if($#arr > 13 && join("", @arr[14..$#arr]) ne "")
+    {
+      printf(STDOUT "Latency           %9s %9s %9s %9s %9s %9s\n"
+           , $arr[14], $arr[15], $arr[16], $arr[17], $arr[18], $arr[19]);
+    }
+  }
+}
+
